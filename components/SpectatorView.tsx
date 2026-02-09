@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { TournamentType, Matchup, Group, TournamentStage, Assignment } from '../types';
+import { TournamentType, Matchup, Group, TournamentStage, Assignment, MatchStatus } from '../types';
 import { MatchupView } from './MatchupView';
 import { BracketView } from './BracketView';
 import { AdvancedStatsView } from './AdvancedStatsView';
@@ -47,7 +47,9 @@ const getSpectatorTable = (group: Group) => {
     });
 
     group.matches.forEach(m => {
-      if (m.score1 !== undefined && m.score2 !== undefined && m.player2) {
+      const isFinished = m.status === MatchStatus.FINISHED || (m.status !== MatchStatus.SCHEDULED && m.score1 !== undefined && m.score2 !== undefined && m.player2 && m.winnerId);
+      
+      if (isFinished && m.score1 !== undefined && m.score2 !== undefined && m.player2) {
         const p1 = stats[m.player1.player.id];
         const p2 = stats[m.player2.player.id];
         
@@ -194,14 +196,23 @@ export const SpectatorView: React.FC<Props> = ({
     const activeGroup = groups[activeGroupIndex];
     const table = getSpectatorTable(activeGroup);
 
-    // Identify the "Current" or "Next" match
-    // Priority: First match without a winnerId.
-    let activeMatchIndex = activeGroup.matches.findIndex(m => !m.winnerId);
+    // Identify the "Current" or "Next" match based on explicitly set status first
+    let activeMatch = activeGroup.matches.find(m => m.status === MatchStatus.IN_PROGRESS);
     
-    // If all finished, show the last one highlighted or just list them.
-    if (activeMatchIndex === -1) activeMatchIndex = activeGroup.matches.length - 1;
+    // If no match is strictly live, find the first scheduled
+    if (!activeMatch) {
+        activeMatch = activeGroup.matches.find(m => !m.status || m.status === MatchStatus.SCHEDULED);
+    }
+
+    // If all else fails (all finished), show the last one
+    if (!activeMatch) {
+        activeMatch = activeGroup.matches[activeGroup.matches.length - 1];
+    }
     
-    const activeMatch = activeGroup.matches[activeMatchIndex];
+    // Calculate index just for display "Partido X de Y"
+    const activeMatchIndex = activeGroup.matches.findIndex(m => m.id === activeMatch?.id);
+    const isLive = activeMatch?.status === MatchStatus.IN_PROGRESS;
+    const isFinished = activeMatch?.status === MatchStatus.FINISHED;
 
     return (
         <div className="flex flex-col h-full animate-fade-in-up">
@@ -267,11 +278,11 @@ export const SpectatorView: React.FC<Props> = ({
                     
                     {/* Featured Match Card (Live or Next) */}
                     {activeMatch && (
-                        <div className="bg-gradient-to-br from-blue-900/40 to-black border-2 border-cyan-500/50 rounded-2xl p-6 shadow-[0_0_30px_rgba(8,145,178,0.2)] relative overflow-hidden group">
+                        <div className={`bg-gradient-to-br border-2 rounded-2xl p-6 shadow-2xl relative overflow-hidden group transition-all duration-500 ${isLive ? 'from-red-900/40 to-black border-red-500/50 shadow-[0_0_50px_rgba(220,38,38,0.3)]' : 'from-blue-900/40 to-black border-cyan-500/50'}`}>
                             {/* Live Badge */}
                             <div className="flex justify-between items-center mb-6">
-                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${activeMatch.winnerId ? 'bg-gray-700 text-gray-300' : 'bg-red-600 text-white animate-pulse'}`}>
-                                    {activeMatch.winnerId ? <><Clock size={14}/> Finalizado</> : <><Radio size={14}/> En Juego</>}
+                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${isLive ? 'bg-red-600 text-white animate-pulse' : isFinished ? 'bg-gray-700 text-gray-300' : 'bg-blue-600 text-white'}`}>
+                                    {isLive ? <><Radio size={14}/> En Vivo</> : isFinished ? <><Clock size={14}/> Finalizado</> : <><CalendarDays size={14}/> Próximo</>}
                                 </div>
                                 <div className="text-cyan-400 text-xs font-bold uppercase tracking-widest">
                                     Partido {activeMatchIndex + 1} de {activeGroup.matches.length}
@@ -290,11 +301,12 @@ export const SpectatorView: React.FC<Props> = ({
 
                                 {/* Score */}
                                 <div className="flex flex-col items-center px-4">
-                                    <div className="text-5xl font-black text-white flex gap-4 items-center bg-black/40 px-4 py-2 rounded-lg border border-white/10">
+                                    <div className={`text-5xl font-black text-white flex gap-4 items-center px-4 py-2 rounded-lg border ${isLive ? 'bg-red-900/20 border-red-500/30' : 'bg-black/40 border-white/10'}`}>
                                         <span>{activeMatch.score1 ?? 0}</span>
                                         <span className="text-gray-600 text-3xl">:</span>
                                         <span>{activeMatch.score2 ?? 0}</span>
                                     </div>
+                                    {isLive && <div className="text-red-500 text-xs font-bold uppercase mt-2 animate-pulse">Jugando Ahora</div>}
                                 </div>
 
                                 {/* P2 */}
@@ -320,12 +332,14 @@ export const SpectatorView: React.FC<Props> = ({
                         <div className="space-y-2">
                             {activeGroup.matches.map((m, idx) => {
                                 const isCurrent = m.id === activeMatch?.id;
-                                const isFinished = !!m.winnerId;
+                                const mIsLive = m.status === MatchStatus.IN_PROGRESS;
+                                const mIsFinished = m.status === MatchStatus.FINISHED;
                                 
                                 return (
                                     <div 
                                         key={m.id} 
                                         className={`p-3 rounded-lg border flex items-center justify-between transition-colors ${
+                                            mIsLive ? 'bg-red-900/20 border-red-500/50' :
                                             isCurrent ? 'bg-white/10 border-cyan-500/50' : 'bg-black/40 border-white/5 opacity-80'
                                         }`}
                                     >
@@ -336,8 +350,9 @@ export const SpectatorView: React.FC<Props> = ({
                                             </span>
                                         </div>
                                         
-                                        <div className="px-3 font-mono font-bold text-white text-sm bg-black/50 rounded py-1 mx-2 min-w-[50px] text-center">
-                                            {m.score1 ?? 0} - {m.score2 ?? 0}
+                                        <div className="px-3 font-mono font-bold text-white text-sm bg-black/50 rounded py-1 mx-2 min-w-[50px] text-center flex flex-col items-center">
+                                            <span>{m.score1 ?? 0} - {m.score2 ?? 0}</span>
+                                            {mIsLive && <span className="text-[9px] text-red-500 uppercase font-bold animate-pulse">Live</span>}
                                         </div>
 
                                         <div className="flex items-center gap-2 flex-1 justify-end">

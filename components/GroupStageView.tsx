@@ -1,13 +1,13 @@
 
 import React from 'react';
-import { Group, Matchup } from '../types';
+import { Group, Matchup, MatchStatus } from '../types';
 import { Button } from './Button';
-import { Trophy, ArrowRight, Shield, Users } from 'lucide-react';
+import { Trophy, ArrowRight, Shield, Users, Play, CheckCircle, Square, Clock } from 'lucide-react';
 import { TeamLogo } from './TeamLogo';
 
 interface Props {
   groups: Group[];
-  onMatchUpdate: (groupId: string, matchId: string, score1: number, score2: number) => void;
+  onMatchUpdate: (groupId: string, matchId: string, updates: Partial<Matchup>) => void;
   onAdvanceToBracket: () => void;
   readOnly?: boolean;
 }
@@ -25,7 +25,11 @@ export const GroupStageView: React.FC<Props> = ({ groups, onMatchUpdate, onAdvan
 
     // Calc from matches
     group.matches.forEach(m => {
-      if (m.score1 !== undefined && m.score2 !== undefined && m.player2) {
+      // Only count matches that are explicitly finished OR have both scores and are not scheduled
+      // Using scores presence as legacy fallback, but preferring status if available
+      const isFinished = m.status === MatchStatus.FINISHED || (m.status !== MatchStatus.SCHEDULED && m.score1 !== undefined && m.score2 !== undefined && m.player2);
+
+      if (isFinished && m.score1 !== undefined && m.score2 !== undefined && m.player2) {
         const p1 = stats[m.player1.player.id];
         const p2 = stats[m.player2.player.id];
         
@@ -44,10 +48,32 @@ export const GroupStageView: React.FC<Props> = ({ groups, onMatchUpdate, onAdvan
       .sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
   };
 
-  const allMatchesPlayed = groups.every(g => g.matches.every(m => m.score1 !== undefined && m.score2 !== undefined));
+  const allMatchesPlayed = groups.every(g => g.matches.every(m => m.status === MatchStatus.FINISHED || m.winnerId !== undefined));
 
   // Extract all assignments for the roster view
   const allAssignments = groups.flatMap(g => g.assignments).sort((a, b) => a.player.name.localeCompare(b.player.name));
+
+  const handleStatusChange = (groupId: string, match: Matchup) => {
+    if (!match.status || match.status === MatchStatus.SCHEDULED) {
+        // Start Match
+        onMatchUpdate(groupId, match.id, { status: MatchStatus.IN_PROGRESS });
+    } else if (match.status === MatchStatus.IN_PROGRESS) {
+        // Finish Match (Auto calculate winner if needed)
+        const s1 = match.score1 || 0;
+        const s2 = match.score2 || 0;
+        let winnerId = null;
+        if (s1 > s2) winnerId = match.player1.player.id;
+        else if (s2 > s1) winnerId = match.player2?.player.id;
+
+        onMatchUpdate(groupId, match.id, { 
+            status: MatchStatus.FINISHED,
+            winnerId
+        });
+    } else {
+        // Re-open match
+        onMatchUpdate(groupId, match.id, { status: MatchStatus.IN_PROGRESS });
+    }
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-12">
@@ -108,39 +134,56 @@ export const GroupStageView: React.FC<Props> = ({ groups, onMatchUpdate, onAdvan
               {/* Matches */}
               <div className="mb-8 space-y-3">
                 <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">Partidos</h4>
-                {group.matches.map(match => (
-                  <div key={match.id} className="flex items-center justify-between bg-black/40 p-3 rounded-lg border border-white/5">
-                    <div className="flex-1 text-right text-sm flex items-center justify-end gap-2">
-                       <span className="text-xs text-gray-500 truncate max-w-[60px]">{match.player1.player.name}</span>
-                       <span className="font-bold text-gray-200 truncate">{match.player1.team.name}</span>
-                       <TeamLogo src={match.player1.team.logo} className="w-6 h-6 object-contain rounded-full" fallbackText={match.player1.team.name} />
-                    </div>
-                    
-                    <div className="flex items-center gap-2 mx-3">
-                      <input 
-                        type="number" 
-                        disabled={readOnly}
-                        className={`w-8 h-8 bg-white/10 text-center rounded text-white font-bold focus:bg-fifa-accent/20 outline-none ${readOnly ? 'border-none bg-transparent' : ''}`}
-                        value={match.score1 ?? ''}
-                        onChange={(e) => onMatchUpdate(group.id, match.id, parseInt(e.target.value) || 0, match.score2 || 0)}
-                      />
-                      <span className="text-gray-500">-</span>
-                      <input 
-                        type="number" 
-                        disabled={readOnly}
-                        className={`w-8 h-8 bg-white/10 text-center rounded text-white font-bold focus:bg-fifa-accent/20 outline-none ${readOnly ? 'border-none bg-transparent' : ''}`}
-                        value={match.score2 ?? ''}
-                        onChange={(e) => onMatchUpdate(group.id, match.id, match.score1 || 0, parseInt(e.target.value) || 0)}
-                      />
-                    </div>
+                {group.matches.map(match => {
+                    const status = match.status || MatchStatus.SCHEDULED;
+                    return (
+                    <div key={match.id} className={`flex items-center justify-between bg-black/40 p-3 rounded-lg border transition-colors ${status === MatchStatus.IN_PROGRESS ? 'border-red-500/50 bg-red-900/10' : 'border-white/5'}`}>
+                        {/* Status Button Control */}
+                        {!readOnly && (
+                            <button 
+                                onClick={() => handleStatusChange(group.id, match)}
+                                className={`mr-2 p-2 rounded-full transition-colors ${
+                                    status === MatchStatus.IN_PROGRESS ? 'bg-red-600 text-white animate-pulse' : 
+                                    status === MatchStatus.FINISHED ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-400 hover:text-white'
+                                }`}
+                                title={status === MatchStatus.IN_PROGRESS ? "Terminar Partido" : status === MatchStatus.FINISHED ? "Reiniciar" : "Iniciar Partido"}
+                            >
+                                {status === MatchStatus.IN_PROGRESS ? <Square size={12} fill="currentColor" /> : 
+                                 status === MatchStatus.FINISHED ? <CheckCircle size={12} /> : <Play size={12} fill="currentColor" />}
+                            </button>
+                        )}
+                        
+                        <div className="flex-1 text-right text-sm flex items-center justify-end gap-2">
+                        <span className="text-xs text-gray-500 truncate max-w-[60px]">{match.player1.player.name}</span>
+                        <span className="font-bold text-gray-200 truncate">{match.player1.team.name}</span>
+                        <TeamLogo src={match.player1.team.logo} className="w-6 h-6 object-contain rounded-full" fallbackText={match.player1.team.name} />
+                        </div>
+                        
+                        <div className="flex items-center gap-2 mx-3">
+                        <input 
+                            type="number" 
+                            disabled={readOnly}
+                            className={`w-8 h-8 bg-white/10 text-center rounded text-white font-bold focus:bg-fifa-accent/20 outline-none ${readOnly ? 'border-none bg-transparent' : ''}`}
+                            value={match.score1 ?? ''}
+                            onChange={(e) => onMatchUpdate(group.id, match.id, { score1: parseInt(e.target.value) || 0 })}
+                        />
+                        <span className="text-gray-500">-</span>
+                        <input 
+                            type="number" 
+                            disabled={readOnly}
+                            className={`w-8 h-8 bg-white/10 text-center rounded text-white font-bold focus:bg-fifa-accent/20 outline-none ${readOnly ? 'border-none bg-transparent' : ''}`}
+                            value={match.score2 ?? ''}
+                            onChange={(e) => onMatchUpdate(group.id, match.id, { score2: parseInt(e.target.value) || 0 })}
+                        />
+                        </div>
 
-                    <div className="flex-1 text-left text-sm flex items-center justify-start gap-2">
-                      <TeamLogo src={match.player2!.team.logo} className="w-6 h-6 object-contain rounded-full" fallbackText={match.player2!.team.name} />
-                      <span className="font-bold text-gray-200 truncate">{match.player2!.team.name}</span>
-                      <span className="text-xs text-gray-500 truncate max-w-[60px]">{match.player2!.player.name}</span>
+                        <div className="flex-1 text-left text-sm flex items-center justify-start gap-2">
+                        <TeamLogo src={match.player2!.team.logo} className="w-6 h-6 object-contain rounded-full" fallbackText={match.player2!.team.name} />
+                        <span className="font-bold text-gray-200 truncate">{match.player2!.team.name}</span>
+                        <span className="text-xs text-gray-500 truncate max-w-[60px]">{match.player2!.player.name}</span>
+                        </div>
                     </div>
-                  </div>
-                ))}
+                )})}
               </div>
 
               {/* Table */}
@@ -197,4 +240,3 @@ export const GroupStageView: React.FC<Props> = ({ groups, onMatchUpdate, onAdvan
     </div>
   );
 };
-    

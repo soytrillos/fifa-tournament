@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { TournamentType, Player, Assignment, Matchup, Team, TournamentStage, Group, TournamentPreset, User, SavedTournament } from './types';
+import { TournamentType, Player, Assignment, Matchup, Team, TournamentStage, Group, TournamentPreset, User, SavedTournament, MatchStatus } from './types';
 import { DEFAULT_TOURNAMENTS } from './constants';
 import { TournamentSelector } from './components/TournamentSelector';
 import { PlayerInput } from './components/PlayerInput';
@@ -241,6 +241,7 @@ const App: React.FC = () => {
              id: `g${g.id}-${i}-${j}`,
              player1: isEven ? g.assignments[i] : g.assignments[j],
              player2: isEven ? g.assignments[j] : g.assignments[i],
+             status: MatchStatus.SCHEDULED // Init status
            });
         }
       }
@@ -254,12 +255,12 @@ const App: React.FC = () => {
     });
   };
 
-  const handleGroupMatchUpdate = (groupId: string, matchId: string, s1: number, s2: number) => {
+  const handleGroupMatchUpdate = (groupId: string, matchId: string, updates: Partial<Matchup>) => {
     const updatedGroups = groups.map(g => {
       if (g.id !== groupId) return g;
       return {
         ...g,
-        matches: g.matches.map(m => m.id === matchId ? { ...m, score1: s1, score2: s2 } : m)
+        matches: g.matches.map(m => m.id === matchId ? { ...m, ...updates } : m)
       };
     });
     updateState({ groups: updatedGroups });
@@ -304,7 +305,8 @@ const App: React.FC = () => {
         player2,
         winnerId: player2 ? undefined : assignments[i].player.id,
         score1: player2 ? undefined : 3, 
-        score2: player2 ? undefined : 0
+        score2: player2 ? undefined : 0,
+        status: player2 ? MatchStatus.SCHEDULED : MatchStatus.FINISHED
       });
     }
     return generatedMatchups;
@@ -365,7 +367,8 @@ const App: React.FC = () => {
             player1: losersStats[0].assignment,
             player2: losersStats[1].assignment,
             isThirdPlace: true,
-            score1: 0, score2: 0
+            score1: 0, score2: 0,
+            status: MatchStatus.SCHEDULED
         });
     }
 

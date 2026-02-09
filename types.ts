@@ -19,6 +19,12 @@ export enum TournamentStage {
   BRACKET = 'BRACKET'
 }
 
+export enum MatchStatus {
+  SCHEDULED = 'SCHEDULED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  FINISHED = 'FINISHED'
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -47,6 +53,7 @@ export interface Matchup {
   score1?: number; // Score for player 1
   score2?: number; // Score for player 2
   isThirdPlace?: boolean; // Flag for third place match
+  status?: MatchStatus; // Current state of the match
 }
 
 export interface Group {
