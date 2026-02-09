@@ -21,7 +21,8 @@ export const DashboardView: React.FC<Props> = ({ user, onNewTournament, onLoadTo
     let mounted = true;
     const loadData = async () => {
       try {
-        const loaded = await db.getUserTournaments(user.id);
+        // Fix: Explicitly cast user.id to string
+        const loaded = await db.getUserTournaments(String(user.id));
         if (mounted) {
            setSaves(loaded);
            setLoading(false);
@@ -136,7 +137,8 @@ export const DashboardView: React.FC<Props> = ({ user, onNewTournament, onLoadTo
                      </Button>
                      <Button 
                        variant="danger" 
-                       onClick={() => handleDelete(save.id)}
+                       // Fix: Explicitly cast save.id to string
+                       onClick={() => handleDelete(String(save.id))}
                        className="py-2 px-3 bg-red-900/50 hover:bg-red-600 border border-red-800 text-red-200"
                      >
                        <Trash2 size={16} />

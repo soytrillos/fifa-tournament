@@ -94,7 +94,8 @@ const App: React.FC = () => {
 
   const handleLoadTournament = (save: SavedTournament) => {
     loadSpecificState(save.state);
-    setCurrentSaveId(save.id);
+    // Fix: Explicitly cast ID to string to resolve TypeScript error
+    setCurrentSaveId(String(save.id));
     setAppMode('tournament');
   };
 
@@ -111,8 +112,10 @@ const App: React.FC = () => {
          // Create new save
          const name = prompt('Nombre para guardar este torneo:', `${tournamentType || 'Torneo'} - ${players.length} Jugadores`);
          if (name) {
-            const save = await db.saveTournament(user.id, state, name);
-            setCurrentSaveId(save.id);
+            // Fix: Explicitly cast user.id to string
+            const save = await db.saveTournament(String(user.id), state, name);
+            // Fix: Explicitly cast save.id to string
+            setCurrentSaveId(String(save.id));
             alert('Torneo creado y guardado.');
          }
       }
