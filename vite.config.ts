@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    base: 'fifa-tournament', // Mantiene rutas relativas
+    base: 'https://github.com/soytrillos/fifa-tournamen', // Mantiene rutas relativas
     define: {
       // Esto permite que el código frontend acceda a process.env.API_KEY
       'process.env.API_KEY': JSON.stringify(env.API_KEY)
