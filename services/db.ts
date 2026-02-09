@@ -1,108 +1,109 @@
 
 import { User, SavedTournament, TournamentStateData } from '../types';
 
-// Simulacion de Base de Datos usando LocalStorage estructurado
-// En una app real, aquí haríamos fetch() a un backend con SQLite/Postgres.
+const STORAGE_KEY_USERS = 'fifa26_users';
+const STORAGE_KEY_TOURNAMENTS = 'fifa26_saved_tournaments';
+const SESSION_KEY = 'fifa26_session_token';
 
-const DB_KEYS = {
-  USERS: 'fifa26_users_v1',
-  TOURNAMENTS: 'fifa26_tournaments_v1',
-  SESSION: 'fifa26_session_v1'
-};
+// Helper to simulate network delay for better UX
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 export const db = {
   // --- AUTH ---
-  
-  register: (username: string, email: string, password: string): User => {
-    const users = JSON.parse(localStorage.getItem(DB_KEYS.USERS) || '[]');
+  register: async (username: string, email: string, password: string): Promise<User> => {
+    await delay(500);
+    const usersStr = localStorage.getItem(STORAGE_KEY_USERS);
+    const users: any[] = usersStr ? JSON.parse(usersStr) : [];
     
-    if (users.some((u: any) => u.email === email)) {
-      throw new Error('El correo ya está registrado');
+    if (users.find(u => u.email === email)) {
+        throw new Error('El correo ya está registrado');
     }
-    
-    // Simulating password hash (store plain for demo, DO NOT do this in prod)
-    const newUser = {
-      id: Math.random().toString(36).substr(2, 9),
-      username,
-      email,
-      password // In real app: bcrypt hash
+
+    const newUser = { 
+        id: 'user_' + Date.now(),
+        username, 
+        email, 
+        password // Storing password in localstorage is insecure but fine for this client-side demo
     };
     
     users.push(newUser);
-    localStorage.setItem(DB_KEYS.USERS, JSON.stringify(users));
+    localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
     
-    // Return user without password
     const { password: _, ...safeUser } = newUser;
+    localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
     return safeUser;
   },
 
-  login: (email: string, password: string): User => {
-    const users = JSON.parse(localStorage.getItem(DB_KEYS.USERS) || '[]');
-    const user = users.find((u: any) => u.email === email && u.password === password);
+  login: async (email: string, password: string): Promise<User> => {
+    await delay(500);
+    const usersStr = localStorage.getItem(STORAGE_KEY_USERS);
+    const users: any[] = usersStr ? JSON.parse(usersStr) : [];
     
+    const user = users.find(u => u.email === email && u.password === password);
+
     if (!user) {
-      throw new Error('Credenciales inválidas');
+        throw new Error('Credenciales inválidas');
     }
-    
+
     const { password: _, ...safeUser } = user;
-    localStorage.setItem(DB_KEYS.SESSION, JSON.stringify(safeUser));
+    localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
     return safeUser;
   },
 
   logout: () => {
-    localStorage.removeItem(DB_KEYS.SESSION);
+    localStorage.removeItem(SESSION_KEY);
   },
 
   getSession: (): User | null => {
-    const session = localStorage.getItem(DB_KEYS.SESSION);
+    const session = localStorage.getItem(SESSION_KEY);
     return session ? JSON.parse(session) : null;
   },
 
   // --- TOURNAMENTS (CRUD) ---
 
-  saveTournament: (userId: string, data: TournamentStateData, name?: string): SavedTournament => {
-    const tournaments: SavedTournament[] = JSON.parse(localStorage.getItem(DB_KEYS.TOURNAMENTS) || '[]');
-    
-    // Generate a default name if not provided or new
-    const finalName = name || `${data.tournamentType || 'Torneo'} - ${new Date().toLocaleDateString()}`;
+  saveTournament: async (userId: string, data: TournamentStateData, name?: string): Promise<SavedTournament> => {
+    await delay(400);
+    const savesStr = localStorage.getItem(STORAGE_KEY_TOURNAMENTS);
+    const saves: SavedTournament[] = savesStr ? JSON.parse(savesStr) : [];
     
     const newSave: SavedTournament = {
-      id: Math.random().toString(36).substr(2, 12),
-      userId,
-      name: finalName,
-      lastModified: Date.now(),
-      state: data
+        id: 'save_' + Date.now(),
+        userId,
+        name: name || `Torneo ${new Date().toLocaleDateString()}`,
+        lastModified: Date.now(),
+        state: data
     };
 
-    tournaments.push(newSave);
-    localStorage.setItem(DB_KEYS.TOURNAMENTS, JSON.stringify(tournaments));
+    saves.push(newSave);
+    localStorage.setItem(STORAGE_KEY_TOURNAMENTS, JSON.stringify(saves));
     return newSave;
   },
 
-  updateTournament: (saveId: string, data: TournamentStateData): void => {
-    const tournaments: SavedTournament[] = JSON.parse(localStorage.getItem(DB_KEYS.TOURNAMENTS) || '[]');
-    const index = tournaments.findIndex(t => t.id === saveId);
-    
-    if (index !== -1) {
-      tournaments[index] = {
-        ...tournaments[index],
-        state: data,
-        lastModified: Date.now()
-      };
-      localStorage.setItem(DB_KEYS.TOURNAMENTS, JSON.stringify(tournaments));
-    }
+  updateTournament: async (saveId: string, data: TournamentStateData): Promise<void> => {
+     await delay(300);
+     const savesStr = localStorage.getItem(STORAGE_KEY_TOURNAMENTS);
+     const saves: SavedTournament[] = savesStr ? JSON.parse(savesStr) : [];
+     
+     const index = saves.findIndex(s => s.id === saveId);
+     if (index !== -1) {
+         saves[index].state = data;
+         saves[index].lastModified = Date.now();
+         localStorage.setItem(STORAGE_KEY_TOURNAMENTS, JSON.stringify(saves));
+     }
   },
 
-  getUserTournaments: (userId: string): SavedTournament[] => {
-    const tournaments: SavedTournament[] = JSON.parse(localStorage.getItem(DB_KEYS.TOURNAMENTS) || '[]');
-    return tournaments
-        .filter(t => t.userId === userId)
-        .sort((a, b) => b.lastModified - a.lastModified);
+  getUserTournaments: async (userId: string): Promise<SavedTournament[]> => {
+    await delay(300);
+    const savesStr = localStorage.getItem(STORAGE_KEY_TOURNAMENTS);
+    const saves: SavedTournament[] = savesStr ? JSON.parse(savesStr) : [];
+    return saves.filter(s => s.userId === userId).sort((a,b) => b.lastModified - a.lastModified);
   },
 
-  deleteTournament: (saveId: string) => {
-    let tournaments: SavedTournament[] = JSON.parse(localStorage.getItem(DB_KEYS.TOURNAMENTS) || '[]');
-    tournaments = tournaments.filter(t => t.id !== saveId);
-    localStorage.setItem(DB_KEYS.TOURNAMENTS, JSON.stringify(tournaments));
+  deleteTournament: async (saveId: string): Promise<void> => {
+    await delay(300);
+    const savesStr = localStorage.getItem(STORAGE_KEY_TOURNAMENTS);
+    let saves: SavedTournament[] = savesStr ? JSON.parse(savesStr) : [];
+    saves = saves.filter(s => s.id !== saveId);
+    localStorage.setItem(STORAGE_KEY_TOURNAMENTS, JSON.stringify(saves));
   }
 };

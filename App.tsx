@@ -33,6 +33,7 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [appMode, setAppMode] = useState<'auth' | 'dashboard' | 'tournament'>('auth');
   const [currentSaveId, setCurrentSaveId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Destructure state for easier access
   const { 
@@ -97,21 +98,29 @@ const App: React.FC = () => {
     setAppMode('tournament');
   };
 
-  const handleSaveTournament = () => {
+  const handleSaveTournament = async () => {
     if (!user) return;
+    setIsSaving(true);
     
-    if (currentSaveId) {
-       // Update existing
-       db.updateTournament(currentSaveId, state);
-       alert('Torneo guardado correctamente.');
-    } else {
-       // Create new save
-       const name = prompt('Nombre para guardar este torneo:', `${tournamentType || 'Torneo'} - ${players.length} Jugadores`);
-       if (name) {
-          const save = db.saveTournament(user.id, state, name);
-          setCurrentSaveId(save.id);
-          alert('Torneo creado y guardado.');
-       }
+    try {
+      if (currentSaveId) {
+         // Update existing
+         await db.updateTournament(currentSaveId, state);
+         alert('Torneo guardado correctamente.');
+      } else {
+         // Create new save
+         const name = prompt('Nombre para guardar este torneo:', `${tournamentType || 'Torneo'} - ${players.length} Jugadores`);
+         if (name) {
+            const save = await db.saveTournament(user.id, state, name);
+            setCurrentSaveId(save.id);
+            alert('Torneo creado y guardado.');
+         }
+      }
+    } catch (e) {
+      alert('Error al guardar en el servidor');
+      console.error(e);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -439,7 +448,7 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex gap-2">
-             <Button onClick={handleSaveTournament} className="py-1 px-3 text-xs h-auto bg-green-700 hover:bg-green-600 border-none">
+             <Button onClick={handleSaveTournament} isLoading={isSaving} className="py-1 px-3 text-xs h-auto bg-green-700 hover:bg-green-600 border-none">
                 <Save size={14} className="mr-1" /> Guardar
              </Button>
              {step !== 'select' && (

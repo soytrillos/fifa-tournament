@@ -15,16 +15,35 @@ interface Props {
 
 export const DashboardView: React.FC<Props> = ({ user, onNewTournament, onLoadTournament, onLogout }) => {
   const [saves, setSaves] = useState<SavedTournament[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loaded = db.getUserTournaments(user.id);
-    setSaves(loaded);
+    let mounted = true;
+    const loadData = async () => {
+      try {
+        const loaded = await db.getUserTournaments(user.id);
+        if (mounted) {
+           setSaves(loaded);
+           setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load tournaments", err);
+        if (mounted) setLoading(false);
+      }
+    };
+    
+    loadData();
+    return () => { mounted = false; };
   }, [user.id]);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('¿Estás seguro de eliminar este torneo?')) {
-      db.deleteTournament(id);
-      setSaves(prev => prev.filter(s => s.id !== id));
+      try {
+        await db.deleteTournament(id);
+        setSaves(prev => prev.filter(s => s.id !== id));
+      } catch (err) {
+        alert('Error al eliminar');
+      }
     }
   };
 
@@ -34,6 +53,10 @@ export const DashboardView: React.FC<Props> = ({ user, onNewTournament, onLoadTo
      if (save.state.stage === 'BRACKET') return 'Sorteo / Eliminatorias';
      return 'Configuración';
   };
+
+  if (loading) {
+      return <div className="flex items-center justify-center min-h-[50vh]"><div className="animate-spin text-cyan-500"><Clock /></div></div>;
+  }
 
   return (
     <div className="w-full max-w-6xl mx-auto p-4 animate-fade-in-up">

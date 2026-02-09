@@ -15,27 +15,26 @@ export const AuthView: React.FC<Props> = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    // Simulate network delay
-    setTimeout(() => {
-      try {
-        if (isLogin) {
-          const user = db.login(formData.email, formData.password);
-          onLogin(user);
-        } else {
-          if (!formData.username) throw new Error("Nombre de usuario requerido");
-          const user = db.register(formData.username, formData.email, formData.password);
-          onLogin(user);
-        }
-      } catch (err: any) {
-        setError(err.message || 'Error desconocido');
-        setIsLoading(false);
+    try {
+      if (isLogin) {
+        const user = await db.login(formData.email, formData.password);
+        onLogin(user);
+      } else {
+        if (!formData.username) throw new Error("Nombre de usuario requerido");
+        const user = await db.register(formData.username, formData.email, formData.password);
+        onLogin(user);
       }
-    }, 800);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Error de conexión con el servidor');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
