@@ -2,11 +2,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { TournamentType, Matchup, Group, TournamentStage, Assignment } from '../types';
 import { MatchupView } from './MatchupView';
-import { GroupStageView } from './GroupStageView';
 import { BracketView } from './BracketView';
 import { AdvancedStatsView } from './AdvancedStatsView';
 import { TeamLogo } from './TeamLogo';
-import { Radio, MonitorPlay, Activity, Users, Pause, Play, SkipForward, SkipBack } from 'lucide-react';
+import { Radio, MonitorPlay, Activity, Pause, Play, SkipForward, SkipBack, Clock, CalendarDays } from 'lucide-react';
 
 interface Props {
   tournamentType: TournamentType | null;
@@ -39,6 +38,34 @@ const getAllAssignments = (groups: Group[], history: Matchup[][], matchups: Matc
   return Array.from(assignmentsMap.values()).sort((a, b) => a.player.name.localeCompare(b.player.name));
 };
 
+// Helper to calculate table stats (Duplicated to allow specific spectator styling without breaking Admin view)
+const getSpectatorTable = (group: Group) => {
+    const stats: Record<string, { p: number, w: number, d: number, l: number, gf: number, ga: number, pts: number }> = {};
+    
+    group.assignments.forEach(a => {
+      stats[a.player.id] = { p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+    });
+
+    group.matches.forEach(m => {
+      if (m.score1 !== undefined && m.score2 !== undefined && m.player2) {
+        const p1 = stats[m.player1.player.id];
+        const p2 = stats[m.player2.player.id];
+        
+        p1.p++; p2.p++;
+        p1.gf += m.score1; p1.ga += m.score2;
+        p2.gf += m.score2; p2.ga += m.score1;
+
+        if (m.score1 > m.score2) { p1.w++; p2.l++; p1.pts += 3; }
+        else if (m.score2 > m.score1) { p2.w++; p1.l++; p2.pts += 3; }
+        else { p1.d++; p2.d++; p1.pts += 1; p2.pts += 1; }
+      }
+    });
+
+    return group.assignments
+      .map(a => ({ ...a, ...stats[a.player.id] }))
+      .sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
+};
+
 type SlideType = 'intro' | 'roster' | 'groups' | 'bracket' | 'stats' | 'podium';
 
 export const SpectatorView: React.FC<Props> = ({
@@ -53,6 +80,9 @@ export const SpectatorView: React.FC<Props> = ({
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
+  
+  // State for sub-rotation (e.g., cycling through Group A, Group B...)
+  const [subSlideIndex, setSubSlideIndex] = useState(0);
 
   // Derive all players
   const allAssignments = useMemo(() => getAllAssignments(groups, history, matchups), [groups, history, matchups]);
@@ -65,7 +95,9 @@ export const SpectatorView: React.FC<Props> = ({
     ];
 
     if (groups.length > 0) {
-      list.push({ type: 'groups', title: 'Fase de Grupos', duration: 15000 });
+      // Dynamic duration based on number of groups (10 seconds per group)
+      const groupsDuration = Math.max(15000, groups.length * 10000); 
+      list.push({ type: 'groups', title: 'Fase de Grupos', duration: groupsDuration });
     }
 
     // Always show bracket/matchups if we are in bracket stage or simply to show the tree
@@ -84,7 +116,7 @@ export const SpectatorView: React.FC<Props> = ({
     return list;
   }, [groups.length, stage, history.length, champion]);
 
-  // Auto-rotation logic
+  // Main Slide Rotation
   useEffect(() => {
     let interval: ReturnType<typeof setTimeout>;
     let progressInterval: ReturnType<typeof setInterval>;
@@ -93,7 +125,8 @@ export const SpectatorView: React.FC<Props> = ({
       const currentSlide = slides[currentSlideIndex];
       const step = 100; // update progress every 100ms
       
-      setProgress(0);
+      // Reset progress when slide changes
+      if (progress >= 100) setProgress(0);
       
       progressInterval = setInterval(() => {
         setProgress(old => {
@@ -105,6 +138,7 @@ export const SpectatorView: React.FC<Props> = ({
       interval = setTimeout(() => {
         setCurrentSlideIndex((prev) => (prev + 1) % slides.length);
         setProgress(0);
+        setSubSlideIndex(0); // Reset sub-slide index on new main slide
       }, currentSlide.duration);
     }
 
@@ -112,16 +146,32 @@ export const SpectatorView: React.FC<Props> = ({
       clearTimeout(interval);
       clearInterval(progressInterval);
     };
-  }, [currentSlideIndex, slides, isPlaying]);
+  }, [currentSlideIndex, slides, isPlaying, progress]); // Added progress dependency to avoid jump
+
+  // Sub-rotation for Groups (Switch group every 10 seconds while in 'groups' slide)
+  useEffect(() => {
+    let subInterval: ReturnType<typeof setInterval>;
+    
+    if (isPlaying && slides[currentSlideIndex].type === 'groups' && groups.length > 0) {
+        subInterval = setInterval(() => {
+            setSubSlideIndex(prev => (prev + 1) % groups.length);
+        }, 10000);
+    }
+
+    return () => clearInterval(subInterval);
+  }, [currentSlideIndex, slides, isPlaying, groups.length]);
+
 
   const handleNext = () => {
     setCurrentSlideIndex((prev) => (prev + 1) % slides.length);
     setProgress(0);
+    setSubSlideIndex(0);
   };
 
   const handlePrev = () => {
     setCurrentSlideIndex((prev) => (prev - 1 + slides.length) % slides.length);
     setProgress(0);
+    setSubSlideIndex(0);
   };
 
   if (!tournamentType) {
@@ -135,13 +185,185 @@ export const SpectatorView: React.FC<Props> = ({
 
   const currentSlide = slides[currentSlideIndex];
 
+  // Logic for Group View Rendering
+  const renderGroupSlide = () => {
+    if (!groups || groups.length === 0) return null;
+    
+    // Safety check for index
+    const activeGroupIndex = subSlideIndex % groups.length;
+    const activeGroup = groups[activeGroupIndex];
+    const table = getSpectatorTable(activeGroup);
+
+    // Identify the "Current" or "Next" match
+    // Priority: First match without a winnerId.
+    let activeMatchIndex = activeGroup.matches.findIndex(m => !m.winnerId);
+    
+    // If all finished, show the last one highlighted or just list them.
+    if (activeMatchIndex === -1) activeMatchIndex = activeGroup.matches.length - 1;
+    
+    const activeMatch = activeGroup.matches[activeMatchIndex];
+
+    return (
+        <div className="flex flex-col h-full animate-fade-in-up">
+            <div className="flex items-center gap-4 mb-6">
+                <div className="bg-cyan-600 text-white text-3xl font-bold px-6 py-2 rounded-lg shadow-[0_0_20px_rgba(8,145,178,0.5)]">
+                    GRUPO {activeGroup.id}
+                </div>
+                <div className="h-1 flex-1 bg-gradient-to-r from-cyan-600/50 to-transparent"></div>
+            </div>
+
+            <div className="grid grid-cols-12 gap-8 h-full">
+                
+                {/* Left Col: Standings Table */}
+                <div className="col-span-12 lg:col-span-7 flex flex-col">
+                    <div className="bg-black/40 border border-white/10 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm flex-1">
+                        <div className="bg-gradient-to-r from-gray-800 to-black p-4 border-b border-white/10 flex justify-between items-center">
+                            <h3 className="text-xl font-bold text-gray-200 uppercase tracking-widest flex items-center gap-2">
+                                <Activity size={20} className="text-cyan-400" /> Tabla de Posiciones
+                            </h3>
+                        </div>
+                        <table className="w-full text-lg">
+                            <thead className="bg-white/5 text-gray-400 font-bold uppercase text-sm tracking-wider">
+                                <tr>
+                                    <th className="p-4 text-left">Equipo</th>
+                                    <th className="p-4 text-center">PJ</th>
+                                    <th className="p-4 text-center">G</th>
+                                    <th className="p-4 text-center">E</th>
+                                    <th className="p-4 text-center">P</th>
+                                    <th className="p-4 text-center">DG</th>
+                                    <th className="p-4 text-center text-white bg-white/10">PTS</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5">
+                                {table.map((row, i) => (
+                                    <tr key={row.player.id} className={`transition-all duration-500 ${i < 2 ? 'bg-green-900/10' : ''}`}>
+                                        <td className="p-4 flex items-center gap-4">
+                                            <span className={`font-mono font-bold w-6 ${i < 2 ? 'text-green-400' : 'text-gray-500'}`}>{i+1}</span>
+                                            <TeamLogo src={row.team.logo} className="w-10 h-10 object-contain drop-shadow-md rounded-full" fallbackText={row.team.name} />
+                                            <div>
+                                                <div className="font-bold text-white leading-tight">{row.team.name}</div>
+                                                <div className="text-sm text-cyan-400 font-bold">{row.player.name}</div>
+                                            </div>
+                                        </td>
+                                        <td className="p-4 text-center font-bold text-gray-400">{row.p}</td>
+                                        <td className="p-4 text-center text-gray-500">{row.w}</td>
+                                        <td className="p-4 text-center text-gray-500">{row.d}</td>
+                                        <td className="p-4 text-center text-gray-500">{row.l}</td>
+                                        <td className={`p-4 text-center font-bold ${row.gf - row.ga > 0 ? 'text-green-400' : 'text-gray-400'}`}>
+                                            {row.gf - row.ga > 0 ? '+' : ''}{row.gf - row.ga}
+                                        </td>
+                                        <td className="p-4 text-center font-black text-2xl text-white bg-white/5 shadow-inner">
+                                            {row.pts}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* Right Col: Fixture / Live Match */}
+                <div className="col-span-12 lg:col-span-5 flex flex-col gap-6">
+                    
+                    {/* Featured Match Card (Live or Next) */}
+                    {activeMatch && (
+                        <div className="bg-gradient-to-br from-blue-900/40 to-black border-2 border-cyan-500/50 rounded-2xl p-6 shadow-[0_0_30px_rgba(8,145,178,0.2)] relative overflow-hidden group">
+                            {/* Live Badge */}
+                            <div className="flex justify-between items-center mb-6">
+                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${activeMatch.winnerId ? 'bg-gray-700 text-gray-300' : 'bg-red-600 text-white animate-pulse'}`}>
+                                    {activeMatch.winnerId ? <><Clock size={14}/> Finalizado</> : <><Radio size={14}/> En Juego</>}
+                                </div>
+                                <div className="text-cyan-400 text-xs font-bold uppercase tracking-widest">
+                                    Partido {activeMatchIndex + 1} de {activeGroup.matches.length}
+                                </div>
+                            </div>
+
+                            <div className="flex justify-between items-center relative z-10">
+                                {/* P1 */}
+                                <div className="flex flex-col items-center flex-1">
+                                    <div className="w-20 h-20 mb-2 relative">
+                                        <TeamLogo src={activeMatch.player1.team.logo} className="w-full h-full object-contain drop-shadow-xl rounded-full" fallbackText={activeMatch.player1.team.name} />
+                                    </div>
+                                    <div className="font-black text-xl text-center leading-none mb-1">{activeMatch.player1.team.name}</div>
+                                    <div className="text-xs text-cyan-400 font-bold uppercase">{activeMatch.player1.player.name}</div>
+                                </div>
+
+                                {/* Score */}
+                                <div className="flex flex-col items-center px-4">
+                                    <div className="text-5xl font-black text-white flex gap-4 items-center bg-black/40 px-4 py-2 rounded-lg border border-white/10">
+                                        <span>{activeMatch.score1 ?? 0}</span>
+                                        <span className="text-gray-600 text-3xl">:</span>
+                                        <span>{activeMatch.score2 ?? 0}</span>
+                                    </div>
+                                </div>
+
+                                {/* P2 */}
+                                <div className="flex flex-col items-center flex-1">
+                                    <div className="w-20 h-20 mb-2 relative">
+                                        {activeMatch.player2 && <TeamLogo src={activeMatch.player2.team.logo} className="w-full h-full object-contain drop-shadow-xl rounded-full" fallbackText={activeMatch.player2.team.name} />}
+                                    </div>
+                                    <div className="font-black text-xl text-center leading-none mb-1">{activeMatch.player2?.team.name || 'BYE'}</div>
+                                    <div className="text-xs text-purple-400 font-bold uppercase">{activeMatch.player2?.player.name}</div>
+                                </div>
+                            </div>
+                            
+                            {/* Bg decoration */}
+                            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full h-full bg-gradient-to-r from-transparent via-cyan-500/5 to-transparent skew-x-12 pointer-events-none"></div>
+                        </div>
+                    )}
+
+                    {/* Match List */}
+                    <div className="flex-1 bg-black/20 border border-white/5 rounded-xl p-4 overflow-y-auto custom-scrollbar">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                            <CalendarDays size={14} /> Calendario del Grupo
+                        </h4>
+                        <div className="space-y-2">
+                            {activeGroup.matches.map((m, idx) => {
+                                const isCurrent = m.id === activeMatch?.id;
+                                const isFinished = !!m.winnerId;
+                                
+                                return (
+                                    <div 
+                                        key={m.id} 
+                                        className={`p-3 rounded-lg border flex items-center justify-between transition-colors ${
+                                            isCurrent ? 'bg-white/10 border-cyan-500/50' : 'bg-black/40 border-white/5 opacity-80'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2 flex-1">
+                                            <TeamLogo src={m.player1.team.logo} className="w-6 h-6 object-contain rounded-full" fallbackText={m.player1.team.name} />
+                                            <span className={`text-sm font-bold truncate ${m.winnerId === m.player1.player.id ? 'text-green-400' : 'text-gray-300'}`}>
+                                                {m.player1.team.name}
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="px-3 font-mono font-bold text-white text-sm bg-black/50 rounded py-1 mx-2 min-w-[50px] text-center">
+                                            {m.score1 ?? 0} - {m.score2 ?? 0}
+                                        </div>
+
+                                        <div className="flex items-center gap-2 flex-1 justify-end">
+                                            <span className={`text-sm font-bold truncate ${m.winnerId && m.player2 && m.winnerId === m.player2.player.id ? 'text-green-400' : 'text-gray-300'}`}>
+                                                {m.player2?.team.name || 'BYE'}
+                                            </span>
+                                            {m.player2 && <TeamLogo src={m.player2.team.logo} className="w-6 h-6 object-contain rounded-full" fallbackText={m.player2.team.name} />}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[#0b0f19] text-white font-sans pb-20 overflow-hidden flex flex-col">
       
       {/* CSS Animation Injection */}
       <style>{`
         @keyframes slideInRight {
-          from { transform: translateX(100%); opacity: 0; }
+          from { transform: translateX(50px); opacity: 0; }
           to { transform: translateX(0); opacity: 1; }
         }
         .animate-slide-in {
@@ -184,14 +406,16 @@ export const SpectatorView: React.FC<Props> = ({
 
       {/* Main Content Area (Dynamic Slider) */}
       <main className="flex-1 relative overflow-hidden flex flex-col">
-        {/* Title Overlay */}
-        <div className="absolute top-8 left-8 z-10">
-            <h2 className="text-4xl md:text-6xl font-black uppercase italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white/10 to-transparent pointer-events-none">
-                {currentSlide.title}
-            </h2>
-        </div>
+        {/* Title Overlay (except for groups where we have specific header) */}
+        {currentSlide.type !== 'groups' && (
+            <div className="absolute top-8 left-8 z-10">
+                <h2 className="text-4xl md:text-6xl font-black uppercase italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white/10 to-transparent pointer-events-none">
+                    {currentSlide.title}
+                </h2>
+            </div>
+        )}
 
-        <div key={currentSlide.type} className="flex-1 w-full h-full p-4 md:p-8 animate-slide-in overflow-y-auto custom-scrollbar">
+        <div key={`${currentSlide.type}-${subSlideIndex}`} className="flex-1 w-full h-full p-4 md:p-8 animate-slide-in overflow-y-auto custom-scrollbar">
             
             {/* --- SLIDE: INTRO --- */}
             {currentSlide.type === 'intro' && (
@@ -209,7 +433,7 @@ export const SpectatorView: React.FC<Props> = ({
                 </div>
             )}
 
-            {/* --- SLIDE: ROSTER (NEW) --- */}
+            {/* --- SLIDE: ROSTER --- */}
             {currentSlide.type === 'roster' && (
                 <div className="max-w-7xl mx-auto pt-16">
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -235,17 +459,8 @@ export const SpectatorView: React.FC<Props> = ({
                 </div>
             )}
 
-            {/* --- SLIDE: GROUPS --- */}
-            {currentSlide.type === 'groups' && (
-                <div className="pt-8 transform scale-90 origin-top">
-                     <GroupStageView 
-                        groups={groups} 
-                        onMatchUpdate={() => {}} 
-                        onAdvanceToBracket={() => {}} 
-                        readOnly={true} 
-                     />
-                </div>
-            )}
+            {/* --- SLIDE: GROUPS (NEW DYNAMIC VIEW) --- */}
+            {currentSlide.type === 'groups' && renderGroupSlide()}
 
             {/* --- SLIDE: BRACKET --- */}
             {currentSlide.type === 'bracket' && (
@@ -306,7 +521,7 @@ export const SpectatorView: React.FC<Props> = ({
             {slides.map((s, idx) => (
                 <button 
                     key={idx}
-                    onClick={() => { setCurrentSlideIndex(idx); setProgress(0); }}
+                    onClick={() => { setCurrentSlideIndex(idx); setProgress(0); setSubSlideIndex(0); }}
                     className={`w-2 h-2 rounded-full transition-all ${currentSlideIndex === idx ? 'bg-cyan-400 w-6' : 'bg-gray-600 hover:bg-gray-400'}`}
                     title={s.title}
                 />
